@@ -1,4 +1,5 @@
 streamlit
-pandas==1.5.3
+pandas
 openpyxl
 xlrd==1.2.0
+setuptools
