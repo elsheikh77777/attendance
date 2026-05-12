@@ -23,107 +23,52 @@ if uploaded_file:
 
     try:
 
-        # =========================
         # حفظ الملف مؤقتًا
-        # =========================
+        suffix = os.path.splitext(uploaded_file.name)[1]
 
-        suffix = os.path.splitext(
-            uploaded_file.name
-        )[1].lower()
-
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            suffix=suffix
-        ) as tmp:
-
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             tmp.write(uploaded_file.read())
-
             temp_path = tmp.name
 
-        # =========================
-        # قراءة الملف
-        # =========================
+        # قراءة ملف الإكسل
+        engine = "openpyxl"
 
         if suffix == ".xls":
+            engine = "xlrd"
 
-            import xlrd
+        excel_file = pd.ExcelFile(
+            temp_path,
+            engine=engine
+        )
 
-            workbook = xlrd.open_workbook(temp_path)
+        # اختيار الشيت
+        sheet_name = "Att.log report"
 
-            sheet = workbook.sheet_by_index(0)
+        if sheet_name not in excel_file.sheet_names:
+            sheet_name = excel_file.sheet_names[0]
 
-            data = []
+        df = pd.read_excel(
+            temp_path,
+            sheet_name=sheet_name,
+            header=None,
+            engine=engine
+        )
 
-            for row_idx in range(sheet.nrows):
-
-                data.append(
-                    sheet.row_values(row_idx)
-                )
-
-            df = pd.DataFrame(data)
-
-        else:
-
-            df = pd.read_excel(
-                temp_path,
-                header=None,
-                engine="openpyxl"
-            )
-
-        # =========================
-        # البحث عن التاريخ تلقائيًا
-        # =========================
-
-        date_text = None
-
-        for row_idx in range(min(15, df.shape[0])):
-
-            for col_idx in range(min(15, df.shape[1])):
-
-                try:
-
-                    cell_value = str(
-                        df.iloc[row_idx, col_idx]
-                    )
-
-                    if "~" in cell_value and "-" in cell_value:
-
-                        date_text = cell_value
-                        break
-
-                except:
-                    pass
-
-            if date_text:
-                break
-
-        if not date_text:
-
-            st.error(
-                "لم يتم العثور على تاريخ التقرير"
-            )
-
-            st.stop()
-
-        # =========================
         # استخراج تاريخ البداية
-        # =========================
+        date_text = str(df.iloc[2, 2])
 
-        start_date_str = date_text.split(
-            "~"
-        )[0].strip()
+        # مثال:
+        # 2026-05-01 ~ 2026-05-11
+
+        start_date_str = date_text.split("~")[0].strip()
 
         start_date = datetime.strptime(
             start_date_str,
             "%Y-%m-%d"
         )
 
-        # =========================
         # إنشاء ملف الإخراج
-        # =========================
-
         out_wb = Workbook()
-
         out_ws = out_wb.active
 
         out_ws.title = "Attendance"
@@ -135,90 +80,47 @@ if uploaded_file:
             "check_out_at"
         ])
 
-        # =========================
         # تحديد أعمدة الأيام
-        # =========================
-
         day_columns = {}
-
-        # الصف الحقيقي للأيام
-        days_row_index = 2
 
         for col in range(df.shape[1]):
 
-            try:
+            value = df.iloc[3, col]
 
-                value = df.iloc[days_row_index, col]
+            if pd.notna(value):
 
-                if pd.notna(value):
+                try:
+                    day_num = int(value)
 
-                    day_num = int(float(value))
+                    current_date = start_date + timedelta(days=day_num - 1)
 
-                    current_date = (
-                        start_date +
-                        timedelta(days=day_num - 1)
-                    )
+                    day_columns[col] = current_date.strftime("%Y-%m-%d")
 
-                    day_columns[col] = (
-                        current_date.strftime("%Y-%m-%d")
-                    )
-
-            except:
-                pass
-
-        # =========================
-        # قراءة الموظفين والبصمات
-        # =========================
+                except:
+                    pass
 
         current_id = None
 
+        # قراءة البيانات
         for row_idx in range(df.shape[0]):
 
             row = df.iloc[row_idx]
 
             values = row.tolist()
 
-            # =====================
             # استخراج ID
-            # =====================
+            if len(values) > 2 and values[0] == "ID:":
 
-            try:
+                if pd.notna(values[2]):
+                    current_id = str(values[2]).strip()
 
-                found_id = False
+                continue
 
-                for idx, cell in enumerate(values):
-
-                    if str(cell).strip() == "ID:":
-
-                        next_idx = idx + 1
-
-                        if next_idx < len(values):
-
-                            employee_id = values[next_idx]
-
-                            if pd.notna(employee_id):
-
-                                current_id = str(
-                                    employee_id
-                                ).strip()
-
-                                found_id = True
-                                break
-
-                if found_id:
-                    continue
-
-            except:
-                pass
-
-            # =====================
-            # استخراج الأوقات
-            # =====================
-
+            # استخراج البصمات
             if current_id:
 
                 has_time = any(
-                    ":" in str(v)
+                    isinstance(v, str) and ":" in v
                     for v in values
                 )
 
@@ -226,59 +128,40 @@ if uploaded_file:
 
                     for col_idx, date_str in day_columns.items():
 
-                        try:
+                        val = df.iloc[row_idx, col_idx]
 
-                            val = df.iloc[
-                                row_idx,
-                                col_idx
-                            ]
+                        if pd.notna(val):
 
-                            if pd.notna(val):
+                            val = str(val)
 
-                                val = str(val)
+                            if ":" in val:
 
-                                if ":" in val:
+                                # استخراج كل الأوقات
+                                times = re.findall(
+                                    r"\d{2}:\d{2}",
+                                    val
+                                )
 
-                                    # استخراج كل الأوقات
+                                if times:
 
-                                    times = re.findall(
-                                        r"\d{2}:\d{2}",
-                                        val
-                                    )
+                                    check_in = times[0]
+                                    check_out = times[-1]
 
-                                    if times:
-
-                                        check_in = times[0]
-
-                                        check_out = times[-1]
-
-                                        out_ws.append([
-                                            current_id,
-                                            date_str,
-                                            check_in,
-                                            check_out
-                                        ])
-
-                        except:
-                            pass
+                                    out_ws.append([
+                                        current_id,
+                                        date_str,
+                                        check_in,
+                                        check_out
+                                    ])
 
                     current_id = None
 
-        # =========================
         # حفظ الملف النهائي
-        # =========================
-
         output_file = "attendance_ready.xlsx"
 
         out_wb.save(output_file)
 
-        # =========================
-        # زر التحميل
-        # =========================
-
-        st.success(
-            "تم تحويل الملف بنجاح"
-        )
+        st.success("تم تحويل الملف بنجاح")
 
         with open(output_file, "rb") as file:
 
@@ -286,14 +169,9 @@ if uploaded_file:
                 label="Download Ready File",
                 data=file,
                 file_name="attendance_ready.xlsx",
-                mime=(
-                    "application/vnd.openxmlformats-"
-                    "officedocument.spreadsheetml.sheet"
-                )
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
     except Exception as e:
 
-        st.error(
-            f"حدث خطأ: {str(e)}"
-        )
+        st.error(f"حدث خطأ: {str(e)}")
