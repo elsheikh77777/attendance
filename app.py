@@ -105,8 +105,9 @@ if uploaded_file:
 
             st.stop()
 
-        # مثال:
-        # 2026-05-01 ~ 2026-05-11
+        # =========================
+        # استخراج تاريخ البداية
+        # =========================
 
         start_date_str = date_text.split(
             "~"
@@ -140,11 +141,14 @@ if uploaded_file:
 
         day_columns = {}
 
+        # الصف الحقيقي للأيام
+        days_row_index = 2
+
         for col in range(df.shape[1]):
 
             try:
 
-                value = df.iloc[3, col]
+                value = df.iloc[days_row_index, col]
 
                 if pd.notna(value):
 
@@ -180,16 +184,28 @@ if uploaded_file:
 
             try:
 
-                first_cell = str(values[0]).strip()
+                found_id = False
 
-                if first_cell == "ID:":
+                for idx, cell in enumerate(values):
 
-                    if pd.notna(values[2]):
+                    if str(cell).strip() == "ID:":
 
-                        current_id = str(
-                            values[2]
-                        ).strip()
+                        next_idx = idx + 1
 
+                        if next_idx < len(values):
+
+                            employee_id = values[next_idx]
+
+                            if pd.notna(employee_id):
+
+                                current_id = str(
+                                    employee_id
+                                ).strip()
+
+                                found_id = True
+                                break
+
+                if found_id:
                     continue
 
             except:
@@ -222,6 +238,8 @@ if uploaded_file:
                                 val = str(val)
 
                                 if ":" in val:
+
+                                    # استخراج كل الأوقات
 
                                     times = re.findall(
                                         r"\d{2}:\d{2}",
